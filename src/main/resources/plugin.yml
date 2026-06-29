@@ -1,0 +1,6 @@
+name: WorldResetter
+main: com.worldresetter.WorldResetter
+api-version: "1.21"
+version: 1.0.0
+load: STARTUP
+author: UstaGodzilla (Github:MrGodzilla38)
