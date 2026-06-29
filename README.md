@@ -8,30 +8,14 @@ On every startup, before the world loads, WorldResetter deletes the `world` fold
 
 `world_nether` and `world_the_end` are not touched.
 
-## Installation
+## Why It Exists
 
-1. Drop `WorldResetter.jar` into your server's `plugins/` folder.
-2. Start the server.
-3. That's it — no configuration needed.
+Built for lava rising minigame servers where every match should feel different. Instead of playing the same map over and over, the world resets on every server restart — giving players a brand new terrain each time.
 
 ## Requirements
 
 - Paper 1.21.4+
 - Java 21+
-
-## Compatibility
-
-Built for use alongside [KteRising](https://github.com/KteProject/KteRising). Each time the lava rising game ends and the server restarts, players get a fresh world to compete on.
-
-## Build
-
-```bash
-git clone https://github.com/MrGodzilla38/WorldResetter.git
-cd WorldResetter
-mvn clean package
-```
-
-The compiled jar will be at `target/WorldResetter-1.0.0.jar`.
 
 ## License
 
