@@ -1,6 +1,17 @@
 name: WorldResetter
 main: com.worldresetter.WorldResetter
 api-version: "1.21"
-version: 1.0.0
+version: 1.1.0
 load: STARTUP
 author: UstaGodzilla (Github:MrGodzilla38)
+
+commands:
+  worldresetter:
+    aliases: [wr]
+    permission: worldresetter.admin
+    usage: /<command> <enable|disable>
+
+permissions:
+  worldresetter.admin:
+    description: Allows managing WorldResetter
+    default: op
