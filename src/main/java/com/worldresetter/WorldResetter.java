@@ -9,7 +9,6 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
-import java.util.Arrays;
 import java.util.List;
 
 public class WorldResetter extends JavaPlugin implements CommandExecutor, TabCompleter {
@@ -53,7 +52,7 @@ public class WorldResetter extends JavaPlugin implements CommandExecutor, TabCom
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         if (args.length == 1) {
-            return Arrays.asList("enable", "disable");
+            return List.of("enable", "disable");
         }
         return List.of();
     }
@@ -93,9 +92,7 @@ public class WorldResetter extends JavaPlugin implements CommandExecutor, TabCom
                 getLogger().info("World reset DISABLED. Takes effect on next restart.");
                 sender.sendMessage("[WorldResetter] World reset DISABLED. Takes effect on next restart.");
             }
-            default -> {
-                sender.sendMessage("Usage: /wr <enable|disable>");
-            }
+            default -> sender.sendMessage("Usage: /wr <enable|disable>");
         }
 
         return true;
