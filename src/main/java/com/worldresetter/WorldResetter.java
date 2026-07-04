@@ -1,9 +1,7 @@
 package com.worldresetter;
 
 import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
-import org.bukkit.command.TabCompleter;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -11,7 +9,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.io.File;
 import java.util.List;
 
-public class WorldResetter extends JavaPlugin implements CommandExecutor, TabCompleter {
+public class WorldResetter extends JavaPlugin {
 
     @Override
     public void onLoad() {
