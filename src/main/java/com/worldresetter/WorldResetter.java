@@ -1,7 +1,10 @@
 package com.worldresetter;
 
+import org.bukkit.Bukkit;
 import org.bukkit.GameRule;
 import org.bukkit.World;
+import org.bukkit.WorldCreator;
+import org.bukkit.WorldType;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
@@ -46,15 +49,6 @@ public class WorldResetter extends JavaPlugin implements Listener {
         "waterSourceConversion"
     );
 
-    private static final Map<String, String> WORLD_TYPE_MAP = new HashMap<>();
-
-    static {
-        WORLD_TYPE_MAP.put("normal", "minecraft:normal");
-        WORLD_TYPE_MAP.put("flat", "minecraft:flat");
-        WORLD_TYPE_MAP.put("large_biomes", "minecraft:large_biomes");
-        WORLD_TYPE_MAP.put("amplified", "minecraft:amplified");
-    }
-
     @Override
     public void onLoad() {
         File configFile = new File(getDataFolder(), "config.yml");
@@ -71,18 +65,31 @@ public class WorldResetter extends JavaPlugin implements Listener {
         getLogger().info("World reset is ENABLED.");
 
         File worldFolder = new File(getServer().getWorldContainer(), WORLD_NAME);
+        boolean shouldCreate = false;
 
         if (worldFolder.exists()) {
             getLogger().info("Deleting world folder...");
 
             if (deleteRecursively(worldFolder)) {
-                getLogger().info("World folder deleted. A fresh world will generate.");
+                getLogger().info("World folder deleted.");
+                shouldCreate = true;
             } else {
                 getLogger().warning("Failed to delete world folder! Check file permissions.");
             }
+        } else {
+            shouldCreate = true;
         }
 
-        applyServerProperties(config);
+        writeSeedAndSpawnProtection(config);
+
+        if (shouldCreate) {
+            World world = createConfiguredWorld(config);
+            if (world != null) {
+                applyGameRules(config, world);
+                applyTime(config, world);
+                applyWeather(config, world);
+            }
+        }
     }
 
     @Override
@@ -297,22 +304,9 @@ public class WorldResetter extends JavaPlugin implements Listener {
     }
 
     private void handleWorldType(CommandSender sender, String[] args) {
-        if (args.length < 3) {
-            sender.sendMessage(PREFIX + "§eUsage: /wr settings worldtype <normal|flat|large_biomes|amplified>");
-            return;
-        }
-
-        String type = args[2].toLowerCase();
-        if (!WORLD_TYPE_MAP.containsKey(type)) {
-            sender.sendMessage("§c[WorldResetter] Invalid world type. Valid values: normal, flat, large_biomes, amplified.");
-            return;
-        }
-
-        File configFile = new File(getDataFolder(), "config.yml");
-        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
-        config.set("settings.world-type", type);
-        saveAndNotify(config, configFile, sender);
-        sender.sendMessage("§a[WorldResetter] World type set to: " + type);
+        sender.sendMessage("§e[WorldResetter] ⚠ World type setting is currently under maintenance.");
+        sender.sendMessage("§7This feature is not yet supported by Paper at startup.");
+        sender.sendMessage("§7It will be re-enabled in a future update.");
     }
 
     private void handleTime(CommandSender sender, String[] args) {
@@ -400,8 +394,7 @@ public class WorldResetter extends JavaPlugin implements Listener {
         String seed = config.getString("settings.seed", "");
         sender.sendMessage("  §eSeed: §f" + (seed.isEmpty() ? "random" : seed));
 
-        String worldType = config.getString("settings.world-type", "normal");
-        sender.sendMessage("  §eWorld Type: §f" + worldType);
+        sender.sendMessage("  §eWorld Type: §6⚠ Under maintenance");
 
         long time = config.getLong("settings.time", -1);
         sender.sendMessage("  §eTime: §f" + (time == -1 ? "not set" : time));
@@ -439,23 +432,49 @@ public class WorldResetter extends JavaPlugin implements Listener {
         sender.sendMessage("§a[WorldResetter] All settings reset to defaults.");
     }
 
-    private void applyServerProperties(FileConfiguration config) {
+    private void writeSeedAndSpawnProtection(FileConfiguration config) {
         String seed = config.getString("settings.seed", "");
-        String worldType = config.getString("settings.world-type", "normal");
         int spawnProtection = config.getInt("settings.spawn-protection", -1);
 
         Map<String, String> entries = new HashMap<>();
-
         entries.put("level-seed", seed);
-
-        String mappedType = WORLD_TYPE_MAP.getOrDefault(worldType.toLowerCase(), "minecraft:normal");
-        entries.put("level-type", mappedType);
 
         if (spawnProtection >= 0) {
             entries.put("spawn-protection", String.valueOf(spawnProtection));
         }
 
         modifyServerProperties(entries);
+    }
+
+    private World createConfiguredWorld(FileConfiguration config) {
+        String worldType = config.getString("settings.world-type", "normal");
+        String seed = config.getString("settings.seed", "");
+
+        WorldCreator creator = new WorldCreator(WORLD_NAME);
+
+        switch (worldType.toLowerCase()) {
+            case "flat" -> creator.type(WorldType.FLAT);
+            case "large_biomes" -> creator.type(WorldType.LARGE_BIOMES);
+            case "amplified" -> creator.type(WorldType.AMPLIFIED);
+            default -> creator.type(WorldType.NORMAL);
+        }
+
+        if (!seed.isEmpty()) {
+            try {
+                creator.seed(Long.parseLong(seed));
+            } catch (NumberFormatException e) {
+                creator.seed(seed.hashCode());
+            }
+        }
+
+        World world = Bukkit.createWorld(creator);
+        if (world != null) {
+            getLogger().info("Created world '" + WORLD_NAME + "' with type: " + worldType
+                + (seed.isEmpty() ? "" : ", seed: " + seed));
+        } else {
+            getLogger().severe("Failed to create world '" + WORLD_NAME + "'.");
+        }
+        return world;
     }
 
     private void modifyServerProperties(Map<String, String> entries) {
