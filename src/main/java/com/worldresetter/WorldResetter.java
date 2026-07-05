@@ -7,6 +7,9 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.world.WorldLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
@@ -17,9 +20,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
-public class WorldResetter extends JavaPlugin {
+public class WorldResetter extends JavaPlugin implements Listener {
 
     private static final String WORLD_NAME = "world";
     private static final String PREFIX = "§e[WorldResetter] ";
@@ -87,18 +89,17 @@ public class WorldResetter extends JavaPlugin {
     public void onEnable() {
         getCommand("worldresetter").setExecutor(this);
         getCommand("worldresetter").setTabCompleter(this);
+        getServer().getPluginManager().registerEvents(this, this);
+    }
 
-        File configFile = new File(getDataFolder(), "config.yml");
-        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
+    @EventHandler
+    public void onWorldLoad(WorldLoadEvent event) {
+        if (!event.getWorld().getName().equals(WORLD_NAME)) return;
 
+        FileConfiguration config = YamlConfiguration.loadConfiguration(new File(getDataFolder(), "config.yml"));
         if (!config.getBoolean("enabled", false)) return;
 
-        World world = getServer().getWorld(WORLD_NAME);
-        if (world == null) {
-            getLogger().warning("Could not find world '" + WORLD_NAME + "' to apply settings.");
-            return;
-        }
-
+        World world = event.getWorld();
         applyGameRules(config, world);
         applyTime(config, world);
         applyWeather(config, world);
