@@ -1,1 +1,9 @@
 enabled: false
+
+settings:
+  seed: ''
+  world-type: 'normal'
+  time: -1
+  weather: ''
+  spawn-protection: -1
+  gamerules: {}
