@@ -80,8 +80,6 @@ public class WorldResetter extends JavaPlugin implements Listener {
             shouldCreate = true;
         }
 
-        writeSeedAndSpawnProtection(config);
-
         if (shouldCreate) {
             World world = createConfiguredWorld(config);
             if (world != null) {
@@ -97,6 +95,14 @@ public class WorldResetter extends JavaPlugin implements Listener {
         getCommand("worldresetter").setExecutor(this);
         getCommand("worldresetter").setTabCompleter(this);
         getServer().getPluginManager().registerEvents(this, this);
+    }
+
+    @Override
+    public void onDisable() {
+        File configFile = new File(getDataFolder(), "config.yml");
+        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
+        if (!config.getBoolean("enabled", false)) return;
+        writeSeedAndSpawnProtection(config);
     }
 
     @EventHandler
