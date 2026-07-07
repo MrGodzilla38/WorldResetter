@@ -1,11 +1,12 @@
 package com.worldresetter;
 
+import io.papermc.paper.command.brigadier.BasicCommand;
+import io.papermc.paper.command.brigadier.CommandSourceStack;
 import org.bukkit.Bukkit;
 import org.bukkit.GameRule;
 import org.bukkit.World;
 import org.bukkit.WorldCreator;
 import org.bukkit.WorldType;
-import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
@@ -20,11 +21,14 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
 
-public class WorldResetter extends JavaPlugin implements Listener {
+public class WorldResetter extends JavaPlugin implements Listener, BasicCommand {
 
     private static final String WORLD_NAME = "world";
     private static final String PREFIX = "§e[WorldResetter] ";
@@ -86,14 +90,14 @@ public class WorldResetter extends JavaPlugin implements Listener {
                 applyGameRules(config, world);
                 applyTime(config, world);
                 applyWeather(config, world);
+                applyPerformanceSettings(config, world);
             }
         }
     }
 
     @Override
     public void onEnable() {
-        getCommand("worldresetter").setExecutor(this);
-        getCommand("worldresetter").setTabCompleter(this);
+        registerCommand("worldresetter", "Manages WorldResetter settings", List.of("wr"), this);
         getServer().getPluginManager().registerEvents(this, this);
     }
 
@@ -103,6 +107,11 @@ public class WorldResetter extends JavaPlugin implements Listener {
         FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
         if (!config.getBoolean("enabled", false)) return;
         writeSeedAndSpawnProtection(config);
+    }
+
+    @Override
+    public String permission() {
+        return "worldresetter.admin";
     }
 
     @EventHandler
@@ -116,16 +125,18 @@ public class WorldResetter extends JavaPlugin implements Listener {
         applyGameRules(config, world);
         applyTime(config, world);
         applyWeather(config, world);
+        applyPerformanceSettings(config, world);
     }
 
     @Override
-    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+    public Collection<String> suggest(CommandSourceStack stack, String[] args) {
         if (args.length == 1) {
             return List.of("enable", "disable", "settings");
         }
 
         if (args.length == 2 && args[0].equalsIgnoreCase("settings")) {
-            return List.of("seed", "gamerule", "worldtype", "time", "weather", "spawnprotection", "info", "reset");
+            return List.of("seed", "gamerule", "worldtype", "time", "weather", "spawnprotection",
+                "viewdistance", "simulationdistance", "structures", "info", "reset");
         }
 
         if (args.length == 3 && args[0].equalsIgnoreCase("settings")) {
@@ -146,6 +157,12 @@ public class WorldResetter extends JavaPlugin implements Listener {
                 case "weather" -> {
                     return List.of("clear", "rain", "thunder");
                 }
+                case "viewdistance", "simulationdistance" -> {
+                    return List.of("default", "4", "6", "8", "10");
+                }
+                case "structures" -> {
+                    return List.of("true", "false");
+                }
             }
         }
 
@@ -153,19 +170,22 @@ public class WorldResetter extends JavaPlugin implements Listener {
     }
 
     @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+    public void execute(CommandSourceStack stack, String[] args) {
+        CommandSender sender = stack.getSender();
+
         if (args.length == 0) {
             sender.sendMessage(PREFIX + "§eUsage: /wr <enable|disable|settings>");
-            return true;
+            return;
         }
 
         if (args[0].equalsIgnoreCase("settings")) {
-            return handleSettings(sender, args);
+            handleSettings(sender, args);
+            return;
         }
 
         if (args.length != 1) {
             sender.sendMessage(PREFIX + "§eUsage: /wr <enable|disable|settings>");
-            return true;
+            return;
         }
 
         File configFile = new File(getDataFolder(), "config.yml");
@@ -179,7 +199,7 @@ public class WorldResetter extends JavaPlugin implements Listener {
                 } catch (Exception e) {
                     getLogger().severe("Failed to save config: " + e.getMessage());
                     sender.sendMessage("§c[WorldResetter] Failed to save config.");
-                    return true;
+                    return;
                 }
                 getLogger().info("World reset ENABLED. Takes effect on next restart.");
                 sender.sendMessage("§a[WorldResetter] World reset ENABLED. Takes effect on next restart.");
@@ -191,20 +211,22 @@ public class WorldResetter extends JavaPlugin implements Listener {
                 } catch (Exception e) {
                     getLogger().severe("Failed to save config: " + e.getMessage());
                     sender.sendMessage("§c[WorldResetter] Failed to save config.");
-                    return true;
+                    return;
                 }
                 getLogger().info("World reset DISABLED. Takes effect on next restart.");
                 sender.sendMessage("§a[WorldResetter] World reset DISABLED. Takes effect on next restart.");
             }
             default -> sender.sendMessage(PREFIX + "§eUsage: /wr <enable|disable|settings>");
         }
-
-        return true;
     }
+
+    private static final String SETTINGS_USAGE =
+        "§eUsage: /wr settings <seed|gamerule|worldtype|time|weather|spawnprotection|"
+        + "viewdistance|simulationdistance|structures|info|reset>";
 
     private boolean handleSettings(CommandSender sender, String[] args) {
         if (args.length < 2) {
-            sender.sendMessage(PREFIX + "§eUsage: /wr settings <seed|gamerule|worldtype|time|weather|spawnprotection|info|reset>");
+            sender.sendMessage(PREFIX + SETTINGS_USAGE);
             return true;
         }
 
@@ -215,9 +237,12 @@ public class WorldResetter extends JavaPlugin implements Listener {
             case "time" -> handleTime(sender, args);
             case "weather" -> handleWeather(sender, args);
             case "spawnprotection" -> handleSpawnProtection(sender, args);
+            case "viewdistance" -> handleViewDistance(sender, args);
+            case "simulationdistance" -> handleSimulationDistance(sender, args);
+            case "structures" -> handleStructures(sender, args);
             case "info" -> handleInfo(sender);
             case "reset" -> handleReset(sender);
-            default -> sender.sendMessage(PREFIX + "§eUsage: /wr settings <seed|gamerule|worldtype|time|weather|spawnprotection|info|reset>");
+            default -> sender.sendMessage(PREFIX + SETTINGS_USAGE);
         }
 
         return true;
@@ -392,6 +417,69 @@ public class WorldResetter extends JavaPlugin implements Listener {
         sender.sendMessage("§a[WorldResetter] Spawn protection radius set to: " + radius);
     }
 
+    private void handleViewDistance(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            sender.sendMessage(PREFIX + "§eUsage: /wr settings viewdistance <2-32|default>");
+            return;
+        }
+
+        int distance = parseDistanceArg(sender, args[2], "view distance", 2, 32);
+        if (distance == Integer.MIN_VALUE) return;
+
+        File configFile = new File(getDataFolder(), "config.yml");
+        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
+        config.set("settings.view-distance", distance);
+        saveAndNotify(config, configFile, sender);
+        sender.sendMessage("§a[WorldResetter] View distance set to: " + (distance == -1 ? "server default" : distance));
+    }
+
+    private void handleSimulationDistance(CommandSender sender, String[] args) {
+        if (args.length < 3) {
+            sender.sendMessage(PREFIX + "§eUsage: /wr settings simulationdistance <2-32|default>");
+            return;
+        }
+
+        int distance = parseDistanceArg(sender, args[2], "simulation distance", 2, 32);
+        if (distance == Integer.MIN_VALUE) return;
+
+        File configFile = new File(getDataFolder(), "config.yml");
+        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
+        config.set("settings.simulation-distance", distance);
+        saveAndNotify(config, configFile, sender);
+        sender.sendMessage("§a[WorldResetter] Simulation distance set to: " + (distance == -1 ? "server default" : distance));
+    }
+
+    private int parseDistanceArg(CommandSender sender, String value, String label, int min, int max) {
+        if (value.equalsIgnoreCase("default")) {
+            return -1;
+        }
+        try {
+            int parsed = Integer.parseInt(value);
+            if (parsed < min || parsed > max) {
+                sender.sendMessage("§c[WorldResetter] " + label + " must be between " + min + " and " + max + ".");
+                return Integer.MIN_VALUE;
+            }
+            return parsed;
+        } catch (NumberFormatException e) {
+            sender.sendMessage("§c[WorldResetter] Invalid " + label + ". Use a number (" + min + "-" + max + ") or 'default'.");
+            return Integer.MIN_VALUE;
+        }
+    }
+
+    private void handleStructures(CommandSender sender, String[] args) {
+        if (args.length < 3 || (!args[2].equalsIgnoreCase("true") && !args[2].equalsIgnoreCase("false"))) {
+            sender.sendMessage(PREFIX + "§eUsage: /wr settings structures <true|false>");
+            return;
+        }
+
+        boolean value = Boolean.parseBoolean(args[2]);
+        File configFile = new File(getDataFolder(), "config.yml");
+        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
+        config.set("settings.generate-structures", value);
+        saveAndNotify(config, configFile, sender);
+        sender.sendMessage("§a[WorldResetter] Structure generation set to: " + value);
+    }
+
     private void handleInfo(CommandSender sender) {
         FileConfiguration config = YamlConfiguration.loadConfiguration(new File(getDataFolder(), "config.yml"));
 
@@ -410,6 +498,14 @@ public class WorldResetter extends JavaPlugin implements Listener {
 
         int spawnProtection = config.getInt("settings.spawn-protection", -1);
         sender.sendMessage("  §eSpawn Protection: §f" + (spawnProtection == -1 ? "not set" : spawnProtection));
+
+        int viewDistance = config.getInt("settings.view-distance", -1);
+        sender.sendMessage("  §eView Distance: §f" + (viewDistance == -1 ? "server default" : viewDistance));
+
+        int simulationDistance = config.getInt("settings.simulation-distance", -1);
+        sender.sendMessage("  §eSimulation Distance: §f" + (simulationDistance == -1 ? "server default" : simulationDistance));
+
+        sender.sendMessage("  §eGenerate Structures: §f" + config.getBoolean("settings.generate-structures", true));
 
         ConfigurationSection gamerules = config.getConfigurationSection("settings.gamerules");
         if (gamerules != null && !gamerules.getKeys(false).isEmpty()) {
@@ -431,6 +527,9 @@ public class WorldResetter extends JavaPlugin implements Listener {
         config.set("settings.time", -1);
         config.set("settings.weather", "");
         config.set("settings.spawn-protection", -1);
+        config.set("settings.view-distance", -1);
+        config.set("settings.simulation-distance", -1);
+        config.set("settings.generate-structures", true);
         config.set("settings.gamerules", null);
         config.set("settings.gamerules", Map.of());
 
@@ -472,6 +571,9 @@ public class WorldResetter extends JavaPlugin implements Listener {
                 creator.seed(seed.hashCode());
             }
         }
+
+        boolean generateStructures = config.getBoolean("settings.generate-structures", true);
+        creator.generateStructures(generateStructures);
 
         World world = Bukkit.createWorld(creator);
         if (world != null) {
@@ -548,6 +650,20 @@ public class WorldResetter extends JavaPlugin implements Listener {
         }
     }
 
+    private void applyPerformanceSettings(FileConfiguration config, World world) {
+        int viewDistance = config.getInt("settings.view-distance", -1);
+        if (viewDistance >= 2) {
+            world.setViewDistance(viewDistance);
+            getLogger().info("Set view distance to " + viewDistance);
+        }
+
+        int simulationDistance = config.getInt("settings.simulation-distance", -1);
+        if (simulationDistance >= 2) {
+            world.setSimulationDistance(simulationDistance);
+            getLogger().info("Set simulation distance to " + simulationDistance);
+        }
+    }
+
     private void applyTime(FileConfiguration config, World world) {
         long time = config.getLong("settings.time", -1);
         if (time < 0) return;
@@ -588,17 +704,45 @@ public class WorldResetter extends JavaPlugin implements Listener {
         }
     }
 
-    private boolean deleteRecursively(File file) {
-        if (file.isDirectory()) {
-            File[] children = file.listFiles();
-            if (children != null) {
-                for (File child : children) {
-                    if (!deleteRecursively(child)) {
-                        return false;
-                    }
+    private boolean deleteRecursively(File root) {
+        if (!root.exists()) return true;
+
+        List<Path> files = new ArrayList<>();
+        List<Path> directories = new ArrayList<>();
+
+        try (Stream<Path> walk = Files.walk(root.toPath())) {
+            walk.forEach(path -> {
+                if (Files.isDirectory(path)) {
+                    directories.add(path);
+                } else {
+                    files.add(path);
                 }
+            });
+        } catch (IOException e) {
+            getLogger().warning("Failed to scan world folder for deletion: " + e.getMessage());
+            return false;
+        }
+
+        boolean[] success = {true};
+        files.parallelStream().forEach(path -> {
+            try {
+                Files.delete(path);
+            } catch (IOException e) {
+                success[0] = false;
+                getLogger().warning("Failed to delete file: " + path + " (" + e.getMessage() + ")");
+            }
+        });
+
+        directories.sort(Comparator.comparingInt(Path::getNameCount).reversed());
+        for (Path dir : directories) {
+            try {
+                Files.delete(dir);
+            } catch (IOException e) {
+                success[0] = false;
+                getLogger().warning("Failed to delete directory: " + dir + " (" + e.getMessage() + ")");
             }
         }
-        return file.delete();
+
+        return success[0];
     }
 }

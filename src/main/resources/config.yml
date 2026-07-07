@@ -6,4 +6,7 @@ settings:
   time: -1
   weather: ''
   spawn-protection: -1
+  view-distance: -1
+  simulation-distance: -1
+  generate-structures: true
   gamerules: {}
