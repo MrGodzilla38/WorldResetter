@@ -12,20 +12,6 @@ On every startup (before worlds load), WorldResetter deletes the `world` folder,
 
 Built for lava rising minigame servers where every match should feel different. Instead of playing the same map over and over, the world resets on every server restart — giving players a brand new terrain each time.
 
-## Platform Support
-
-WorldResetter targets **Paper and Paper-based forks (Purpur, etc.) only** — it is not compatible with vanilla Spigot or CraftBukkit.
-
-This is a deliberate choice, not a limitation: the plugin uses Paper-exclusive per-world API (`World#setViewDistance`, `World#setSimulationDistance`) that doesn't exist on Spigot's API surface at all. Purpur is a drop-in fork of Paper — it inherits the full Paper API unchanged — so anything that runs on Paper runs on Purpur with no extra work.
-
-## Performance Optimizations (Paper-only)
-
-These are the reasons this plugin specifically targets Paper rather than plain Bukkit/Spigot:
-
-- **Parallelized world deletion.** Deleting the old `world` folder happens synchronously at startup and directly delays boot time — the bigger the world, the longer players wait. WorldResetter now deletes all region/entity/POI files in parallel across CPU cores (instead of one file at a time), then removes the now-empty directory tree. On an SSD/NVMe with a large previous world, this can cut deletion time dramatically compared to a naive recursive delete.
-- **Per-world view/simulation distance.** `settings.view-distance` and `settings.simulation-distance` let this world override the server-wide values from `server.properties`, using Paper's per-world API. Lava-rising-style minigame maps are small and don't need the server's default render distance — dropping it cuts chunk-loading and entity-tracking overhead specifically for this world, without touching your other worlds.
-- **Optional structure generation toggle.** `settings.generate-structures` (default `true`) lets you disable village/stronghold/etc. generation for faster chunk generation on maps where players never explore for loot.
-
 ## Commands
 
 | Command | Description |
@@ -72,6 +58,20 @@ settings:
 - Java 21+
 
 Not compatible with vanilla Spigot or CraftBukkit — see [Platform Support](#platform-support) above.
+
+## Platform Support
+
+WorldResetter targets **Paper and Paper-based forks (Purpur, etc.) only** — it is not compatible with vanilla Spigot or CraftBukkit.
+
+This is a deliberate choice, not a limitation: the plugin uses Paper-exclusive per-world API (`World#setViewDistance`, `World#setSimulationDistance`) that doesn't exist on Spigot's API surface at all. Purpur is a drop-in fork of Paper — it inherits the full Paper API unchanged — so anything that runs on Paper runs on Purpur with no extra work.
+
+## Performance Optimizations (Paper-only)
+
+These are the reasons this plugin specifically targets Paper rather than plain Bukkit/Spigot:
+
+- **Parallelized world deletion.** Deleting the old `world` folder happens synchronously at startup and directly delays boot time — the bigger the world, the longer players wait. WorldResetter now deletes all region/entity/POI files in parallel across CPU cores (instead of one file at a time), then removes the now-empty directory tree. On an SSD/NVMe with a large previous world, this can cut deletion time dramatically compared to a naive recursive delete.
+- **Per-world view/simulation distance.** `settings.view-distance` and `settings.simulation-distance` let this world override the server-wide values from `server.properties`, using Paper's per-world API. Lava-rising-style minigame maps are small and don't need the server's default render distance — dropping it cuts chunk-loading and entity-tracking overhead specifically for this world, without touching your other worlds.
+- **Optional structure generation toggle.** `settings.generate-structures` (default `true`) lets you disable village/stronghold/etc. generation for faster chunk generation on maps where players never explore for loot.
 
 ## License
 
