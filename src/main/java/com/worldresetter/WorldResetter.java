@@ -191,32 +191,7 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
 
         switch (args[0].toLowerCase()) {
-            // yorum satırındaki kodları test amaçlı yorum satırı yaptım sonra silinecekler.
-            // case "enable" -> {
-            //     config.set("enabled", true);
-            //     try {
-            //         config.save(configFile);
-            //     } catch (Exception e) {
-            //         getLogger().severe("Failed to save config: " + e.getMessage());
-            //         sender.sendMessage("§c[WorldResetter] Failed to save config.");
-            //         return;
-            //     }
-            //     getLogger().info("World reset ENABLED. Takes effect on next restart.");
-            //     sender.sendMessage("§a[WorldResetter] World reset ENABLED. Takes effect on next restart.");
-            // }
-            // case "disable" -> {
-            //     config.set("enabled", false);
-            //     try {
-            //         config.save(configFile);
-            //     } catch (Exception e) {
-            //         getLogger().severe("Failed to save config: " + e.getMessage());
-            //         sender.sendMessage("§c[WorldResetter] Failed to save config.");
-            //         return;
-            //     }
-            //     getLogger().info("World reset DISABLED. Takes effect on next restart.");
-            //     sender.sendMessage("§a[WorldResetter] World reset DISABLED. Takes effect on next restart.");
-            // }
-            case "toggle" -> {
+             case "toggle" -> {
                 if (args.length == 1) {
                     boolean current = config.getBoolean("enabled", false);
                     config.set("enabled", !current);
