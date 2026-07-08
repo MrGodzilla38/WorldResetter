@@ -16,8 +16,9 @@ Built for lava rising minigame servers where every match should feel different. 
 
 | Command | Description |
 |---|---|
-| `/wr enable` | Enables world reset on next startup |
-| `/wr disable` | Disables world reset on next startup |
+| `/wr toggle` | Toggles world reset on/off |
+| `/wr toggle on` | Enables world reset on next startup |
+| `/wr toggle off` | Disables world reset on next startup |
 | `/wr settings info` | Shows current settings |
 | `/wr settings seed <seed\|random>` | Sets the world seed (or random) |
 | `/wr settings worldtype <type>` | Sets world type (normal/flat/large_biomes/amplified) |

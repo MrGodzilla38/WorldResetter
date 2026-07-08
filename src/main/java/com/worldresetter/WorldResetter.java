@@ -131,7 +131,11 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
     @Override
     public Collection<String> suggest(CommandSourceStack stack, String[] args) {
         if (args.length == 1) {
-            return List.of("enable", "disable", "settings");
+            return List.of("toggle", "settings");
+        }
+
+        if (args.length == 2 && args[0].equalsIgnoreCase("toggle")) {
+            return List.of("on", "off");
         }
 
         if (args.length == 2 && args[0].equalsIgnoreCase("settings")) {
@@ -174,7 +178,7 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         CommandSender sender = stack.getSender();
 
         if (args.length == 0) {
-            sender.sendMessage(PREFIX + "§eUsage: /wr <enable|disable|settings>");
+            sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings>");
             return;
         }
 
@@ -183,40 +187,71 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
             return;
         }
 
-        if (args.length != 1) {
-            sender.sendMessage(PREFIX + "§eUsage: /wr <enable|disable|settings>");
-            return;
-        }
-
         File configFile = new File(getDataFolder(), "config.yml");
         FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
 
         switch (args[0].toLowerCase()) {
-            case "enable" -> {
-                config.set("enabled", true);
-                try {
-                    config.save(configFile);
-                } catch (Exception e) {
-                    getLogger().severe("Failed to save config: " + e.getMessage());
-                    sender.sendMessage("§c[WorldResetter] Failed to save config.");
-                    return;
+            // yorum satırındaki kodları test amaçlı yorum satırı yaptım sonra silinecekler.
+            // case "enable" -> {
+            //     config.set("enabled", true);
+            //     try {
+            //         config.save(configFile);
+            //     } catch (Exception e) {
+            //         getLogger().severe("Failed to save config: " + e.getMessage());
+            //         sender.sendMessage("§c[WorldResetter] Failed to save config.");
+            //         return;
+            //     }
+            //     getLogger().info("World reset ENABLED. Takes effect on next restart.");
+            //     sender.sendMessage("§a[WorldResetter] World reset ENABLED. Takes effect on next restart.");
+            // }
+            // case "disable" -> {
+            //     config.set("enabled", false);
+            //     try {
+            //         config.save(configFile);
+            //     } catch (Exception e) {
+            //         getLogger().severe("Failed to save config: " + e.getMessage());
+            //         sender.sendMessage("§c[WorldResetter] Failed to save config.");
+            //         return;
+            //     }
+            //     getLogger().info("World reset DISABLED. Takes effect on next restart.");
+            //     sender.sendMessage("§a[WorldResetter] World reset DISABLED. Takes effect on next restart.");
+            // }
+            case "toggle" -> {
+                if (args.length == 1) {
+                    boolean current = config.getBoolean("enabled", false);
+                    config.set("enabled", !current);
+                    try {
+                        config.save(configFile);
+                    } catch (Exception e) {
+                        getLogger().severe("Failed to save config: " + e.getMessage());
+                        sender.sendMessage("§c[WorldResetter] Failed to save config.");
+                        return;
+                    }
+                    String state = !current ? "ENABLED" : "DISABLED";
+                    getLogger().info("World reset " + state + ". Takes effect on next restart.");
+                    sender.sendMessage("§a[WorldResetter] Toggled: World reset " + state + ". Takes effect on next restart.");
+                } else if (args.length == 2) {
+                    boolean enable = args[1].equalsIgnoreCase("on");
+                    if (!enable && !args[1].equalsIgnoreCase("off")) {
+                        sender.sendMessage(PREFIX + "§eUsage: /wr toggle <on|off>");
+                        return;
+                    }
+                    config.set("enabled", enable);
+                    try {
+                        config.save(configFile);
+                    } catch (Exception e) {
+                        getLogger().severe("Failed to save config: " + e.getMessage());
+                        sender.sendMessage("§c[WorldResetter] Failed to save config.");
+                        return;
+                    }
+                    String state = enable ? "ENABLED" : "DISABLED";
+                    getLogger().info("World reset " + state + ". Takes effect on next restart.");
+                    sender.sendMessage("§a[WorldResetter] World reset " + state + ". Takes effect on next restart.");
+                } else {
+                    sender.sendMessage(PREFIX + "§eUsage: /wr toggle [on|off]");
                 }
-                getLogger().info("World reset ENABLED. Takes effect on next restart.");
-                sender.sendMessage("§a[WorldResetter] World reset ENABLED. Takes effect on next restart.");
             }
-            case "disable" -> {
-                config.set("enabled", false);
-                try {
-                    config.save(configFile);
-                } catch (Exception e) {
-                    getLogger().severe("Failed to save config: " + e.getMessage());
-                    sender.sendMessage("§c[WorldResetter] Failed to save config.");
-                    return;
-                }
-                getLogger().info("World reset DISABLED. Takes effect on next restart.");
-                sender.sendMessage("§a[WorldResetter] World reset DISABLED. Takes effect on next restart.");
-            }
-            default -> sender.sendMessage(PREFIX + "§eUsage: /wr <enable|disable|settings>");
+            default -> sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings>");
         }
     }
 
