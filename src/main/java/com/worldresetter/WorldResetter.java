@@ -153,7 +153,7 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         String current = getPluginMeta().getVersion();
         if (compareVersions(latestVersion, current) <= 0) return;
         if (event.getPlayer().isOp() || event.getPlayer().hasPermission("worldresetter.admin")) {
-            event.getPlayer().sendMessage("§e[WorldResetter] Update available. Latest: §a" + latestVersion + "§e, Current: §c" + current);
+            event.getPlayer().sendMessage("§e[WorldResetter] Update available. Latest: §a" + latestVersion + "§e, Current: §c" + current + "§e. Use §a/wr version update§e to install.");
         }
     }
 
@@ -281,7 +281,7 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
             return;
         }
         if (compareVersions(latestVersion, current) > 0) {
-            sender.sendMessage("§e[WorldResetter] Update available. Latest: §a" + latestVersion + "§e, Current: §c" + current);
+            sender.sendMessage("§e[WorldResetter] Update available. Latest: §a" + latestVersion + "§e, Current: §c" + current + "§e. Use §a/wr version update§e to install.");
         } else {
             sender.sendMessage("§a[WorldResetter] Version is up to date: §f" + current);
         }
