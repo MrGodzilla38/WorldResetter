@@ -27,6 +27,8 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -34,6 +36,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
@@ -64,6 +67,9 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
     );
 
     private volatile String latestVersion;
+    private volatile String latestDownloadUrl;
+    private volatile String latestFileName;
+    private volatile String latestSha1;
 
     @Override
     public void onLoad() {
@@ -155,6 +161,10 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
     public Collection<String> suggest(CommandSourceStack stack, String[] args) {
         if (args.length == 1) {
             return List.of("toggle", "settings", "version");
+        }
+
+        if (args.length == 2 && args[0].equalsIgnoreCase("version")) {
+            return List.of("update");
         }
 
         if (args.length == 2 && args[0].equalsIgnoreCase("toggle")) {
@@ -249,7 +259,13 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
                     sender.sendMessage(PREFIX + "§eUsage: /wr toggle [on|off]");
                 }
             }
-            case "version" -> handleVersion(sender);
+            case "version" -> {
+                if (args.length >= 2 && args[1].equalsIgnoreCase("update")) {
+                    handleVersionUpdate(sender);
+                } else {
+                    handleVersion(sender);
+                }
+            }
             default -> sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings|version>");
         }
     }
@@ -269,6 +285,87 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         } else {
             sender.sendMessage("§a[WorldResetter] Version is up to date: §f" + current);
         }
+    }
+
+    private void handleVersionUpdate(CommandSender sender) {
+        if (latestVersion == null || latestDownloadUrl == null) {
+            sender.sendMessage(PREFIX + "§eVersion information not yet available. Please try again later.");
+            return;
+        }
+
+        String current = getPluginMeta().getVersion();
+        if (compareVersions(latestVersion, current) <= 0) {
+            sender.sendMessage("§a[WorldResetter] Version is already up to date: §f" + current);
+            return;
+        }
+
+        sender.sendMessage(PREFIX + "§eDownloading update (v" + latestVersion + ")...");
+
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create(latestDownloadUrl))
+            .timeout(Duration.ofSeconds(30))
+            .GET()
+            .build();
+
+        client.sendAsync(request, HttpResponse.BodyHandlers.ofByteArray())
+            .thenAccept(response -> {
+                try {
+                    byte[] data = response.body();
+                    MessageDigest md = MessageDigest.getInstance("SHA-1");
+                    byte[] digest = md.digest(data);
+                    String sha1Hex = HexFormat.of().formatHex(digest);
+
+                    if (!sha1Hex.equalsIgnoreCase(latestSha1)) {
+                        throw new SecurityException("SHA-1 mismatch");
+                    }
+
+                    String fileName = (latestFileName != null && !latestFileName.isEmpty())
+                        ? latestFileName : "WorldResetter-" + latestVersion + ".jar";
+                    Path pluginsDir = getDataFolder().getParentFile().toPath();
+                    Path newJarPath = pluginsDir.resolve(fileName);
+
+                    Files.write(newJarPath, data);
+
+                    File currentJar = getFile();
+                    boolean oldDeleted = true;
+                    try {
+                        Files.deleteIfExists(currentJar.toPath());
+                    } catch (IOException e) {
+                        oldDeleted = false;
+                        getLogger().warning("Failed to delete old jar: " + currentJar.getAbsolutePath() + " - " + e.getMessage());
+                        Bukkit.getScheduler().runTask(this, () ->
+                            sender.sendMessage("§e[WorldResetter] New version downloaded but old file could not be deleted. You may need to remove it manually: §f" + currentJar.getAbsolutePath()));
+                    }
+
+                    if (oldDeleted) {
+                        Bukkit.getScheduler().runTask(this, () ->
+                            sender.sendMessage("§a[WorldResetter] Update downloaded successfully! Version v" + latestVersion + " will be active after server restart."));
+                    }
+                } catch (SecurityException e) {
+                    getLogger().warning("Update download failed SHA-1 verification.");
+                    Bukkit.getScheduler().runTask(this, () ->
+                        sender.sendMessage("§c[WorldResetter] Download verification failed. Update was cancelled."));
+                } catch (NoSuchAlgorithmException e) {
+                    getLogger().severe("SHA-1 algorithm not available: " + e.getMessage());
+                    Bukkit.getScheduler().runTask(this, () ->
+                        sender.sendMessage("§c[WorldResetter] SHA-1 algorithm unavailable. Update cannot proceed."));
+                } catch (IOException e) {
+                    getLogger().severe("Failed to write update file: " + e.getMessage());
+                    Bukkit.getScheduler().runTask(this, () ->
+                        sender.sendMessage("§c[WorldResetter] Failed to save update file: " + e.getMessage()));
+                } catch (Exception e) {
+                    getLogger().severe("Unexpected error during update: " + e.getMessage());
+                    Bukkit.getScheduler().runTask(this, () ->
+                        sender.sendMessage("§c[WorldResetter] An unexpected error occurred: " + e.getMessage()));
+                }
+            })
+            .exceptionally(e -> {
+                getLogger().warning("Update download failed: " + e.getMessage());
+                Bukkit.getScheduler().runTask(this, () ->
+                    sender.sendMessage("§c[WorldResetter] Download failed: " + e.getMessage()));
+                return null;
+            });
     }
 
     private boolean handleSettings(CommandSender sender, String[] args) {
@@ -827,8 +924,8 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
                 if (response.statusCode() == 200) {
                     try {
                         JsonArray versions = JsonParser.parseString(response.body()).getAsJsonArray();
-                        String latest = null;
-                        String latestDate = null;
+                        JsonObject best = null;
+                        String bestDate = null;
 
                         for (JsonElement elem : versions) {
                             JsonObject ver = elem.getAsJsonObject();
@@ -836,19 +933,50 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
                             String date = ver.get("date_published").getAsString();
 
                             if ("release".equals(type)) {
-                                if (latest == null || date.compareTo(latestDate) > 0) {
-                                    latest = ver.get("version_number").getAsString();
-                                    latestDate = date;
+                                if (best == null || date.compareTo(bestDate) > 0) {
+                                    best = ver;
+                                    bestDate = date;
                                 }
                             }
                         }
 
-                        if (latest == null && versions.size() > 0) {
-                            latest = versions.get(0).getAsJsonObject().get("version_number").getAsString();
+                        if (best == null && versions.size() > 0) {
+                            best = versions.get(0).getAsJsonObject();
                         }
 
-                        latestVersion = latest;
-                        getLogger().info("Latest version: " + (latest != null ? latest : "unknown"));
+                        if (best != null) {
+                            String version = best.get("version_number").getAsString();
+                            String downloadUrl = null;
+                            String fileName = null;
+                            String sha1 = null;
+
+                            JsonArray files = best.getAsJsonArray("files");
+                            if (files != null && files.size() > 0) {
+                                JsonObject primaryFile = null;
+                                for (JsonElement fileElem : files) {
+                                    JsonObject fileObj = fileElem.getAsJsonObject();
+                                    if (fileObj.get("primary").getAsBoolean()) {
+                                        primaryFile = fileObj;
+                                        break;
+                                    }
+                                }
+                                if (primaryFile == null) {
+                                    primaryFile = files.get(0).getAsJsonObject();
+                                }
+                                downloadUrl = primaryFile.get("url").getAsString();
+                                fileName = primaryFile.get("filename").getAsString();
+                                JsonObject hashes = primaryFile.getAsJsonObject("hashes");
+                                if (hashes != null) {
+                                    sha1 = hashes.get("sha1").getAsString();
+                                }
+                            }
+
+                            latestVersion = version;
+                            latestDownloadUrl = downloadUrl;
+                            latestFileName = fileName;
+                            latestSha1 = sha1;
+                            getLogger().info("Latest version: " + version);
+                        }
                     } catch (Exception e) {
                         getLogger().warning("Failed to parse Modrinth response: " + e.getMessage());
                     }
