@@ -1,6 +1,6 @@
 # 🌍 WorldResetter
 
-A minimal Paper plugin that deletes the overworld folder on every server startup and creates a fresh world with configurable seed, type, gamerules, time, weather, and Paper-specific performance tuning.
+A minimal **Paper** plugin that deletes the overworld folder on every server startup and creates a fresh world with configurable seed, type, gamerules, time, weather, and Paper-specific performance tuning.
 
 ---
 
@@ -29,7 +29,7 @@ Built for lava rising minigame servers where every match should feel different. 
 | ❌ `/wr toggle off` | Disables world reset on next startup |
 | ℹ️ `/wr settings info` | Shows current settings |
 | 🌱 `/wr settings seed <seed\|random>` | Sets the world seed (or random) |
-| 🗺️ `/wr settings worldtype <type>` | Sets world type (normal/flat/large_biomes/amplified) |
+| 🗺️ `/wr settings worldtype <type>` | ⚠️ Currently under maintenance — disabled |
 | 🎲 `/wr settings gamerule <rule> <value>` | Sets a gamerule |
 | 🎲 `/wr settings gamerule list` | Lists configured gamerules |
 | 🎲 `/wr settings gamerule reset` | Clears all gamerules |
@@ -40,8 +40,11 @@ Built for lava rising minigame servers where every match should feel different. 
 | 🌐 `/wr settings simulationdistance <2-32\|default>` | Sets this world's simulation distance (Paper-only) |
 | 🏛️ `/wr settings structures <true\|false>` | Toggles structure generation (villages, strongholds, etc.) |
 | ♻️ `/wr settings reset` | Resets all settings to defaults |
+| 📦 `/wr version` | Shows current version vs latest available |
+| 📥 `/wr version update` | Downloads and applies the latest version from Modrinth |
 
 **Alias:** `/worldresetter` can be used in place of `/wr`
+
 **Permission:** `worldresetter.admin` (default: op)
 
 ---
@@ -75,9 +78,9 @@ settings:
 
 ## 🧩 Platform Support
 
-WorldResetter only works on **Paper** and Paper-based servers like **Purpur** — it does not work on plain Spigot or CraftBukkit.
+WorldResetter uses the **Paper Plugin** system (not Bukkit's `plugin.yml`) and only works on **Paper** and Paper-based servers like **Purpur** — it does not work on plain Spigot or CraftBukkit.
 
-This isn't a bug, it's intentional: some of the plugin's features (like per-world view distance) simply don't exist outside of Paper. If your server runs on Purpur, you're fine — Purpur is built on top of Paper, so everything works the same.
+This isn't a bug, it's intentional: some of the plugin's features (like per-world view distance and the modern command API) simply don't exist outside of Paper. If your server runs on Purpur, you're fine — Purpur is built on top of Paper, so everything works the same.
 
 ---
 
@@ -88,6 +91,12 @@ A few things this plugin does to keep your server running smoothly:
 - **⚡ Faster restarts** — Deleting the old world used to happen one file at a time, which could take a while on large maps. Now it deletes everything at once using multiple CPU cores, so your server starts back up much faster — especially noticeable on SSD/NVMe drives.
 - **🪶 Lighter load per world** — You can lower the view distance and simulation distance just for this world, without affecting your other worlds. Small minigame maps don't need long render distances, so turning this down reduces lag with no downside.
 - **⏭️ Skip unnecessary generation** — If players never explore for loot, you can turn off village/stronghold generation entirely — this makes new worlds generate faster.
+
+---
+
+## 🔄 Auto-Update
+
+WorldResetter checks the Modrinth API every 6 hours for new releases. OPs are notified on join when an update is available. Use `/wr version` to check manually and `/wr version update` to download and apply the update automatically.
 
 ---
 
