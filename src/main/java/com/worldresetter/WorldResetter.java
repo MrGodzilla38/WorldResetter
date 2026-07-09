@@ -15,9 +15,11 @@ import org.bukkit.command.CommandSender;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.world.WorldLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -27,44 +29,30 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Stream;
 
 public class WorldResetter extends JavaPlugin implements Listener, BasicCommand {
 
-    private static final String WORLD_NAME = "world";
     private static final String PREFIX = "§e[WorldResetter] ";
+    private static final UUID CONSOLE_UUID = new UUID(0, 0);
 
-    private static final List<String> COMMON_GAMERULES = List.of(
-        "announceAdvancements", "blockExplosionDropDecay", "commandBlockOutput",
-        "disableElytraMovementCheck", "disableRaids", "doDaylightCycle",
-        "doEntityDrops", "doFireTick", "doImmediateRespawn", "doInsomnia",
-        "doLimitedCrafting", "doMobLoot", "doMobSpawning", "doPatrolSpawning",
-        "doTileDrops", "doTraderSpawning", "doVinesSpread", "doWeatherCycle",
-        "doWardenSpawning", "drowningDamage", "enderPearlsVanishOnDeath",
-        "fallDamage", "fireDamage", "forgiveDeadPlayers", "freezeDamage",
-        "globalSoundEvents", "keepInventory",
-        "lavaSourceConversion", "logAdminCommands", "maxCommandChainLength",
-        "maxEntityCramming", "mobExplosionDropDecay", "mobGriefing",
-        "naturalRegeneration", "playersSleepingPercentage",
-        "projectilesCanBreakBlocks", "randomTickSpeed", "reducedDebugInfo",
-        "respawnBlocksExplode", "sendCommandFeedback", "showBorderEffect",
-        "showCoordinates", "showDeathMessages", "showRecipeMessages",
-        "showTags", "snowAccumulationHeight", "spawnRadius",
-        "spectatorsGenerateChunks", "tntExplosionDropDecay", "universalAnger",
-        "waterSourceConversion"
-    );
+    private final Map<UUID, String> selectedWorlds = new ConcurrentHashMap<>();
 
     private volatile String latestVersion;
     private volatile String latestDownloadUrl;
@@ -73,42 +61,48 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
 
     @Override
     public void onLoad() {
-        File configFile = new File(getDataFolder(), "config.yml");
         if (!getDataFolder().exists()) getDataFolder().mkdirs();
-        if (!configFile.exists()) saveDefaultConfig();
-        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
-        boolean enabled = config.getBoolean("enabled", false);
 
-        if (!enabled) {
-            getLogger().info("World reset is DISABLED. Skipping.");
-            return;
-        }
+        migrateOldConfig();
 
-        getLogger().info("World reset is ENABLED.");
+        File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+        if (!worldsConfigFile.exists()) return;
 
-        File worldFolder = new File(getServer().getWorldContainer(), WORLD_NAME);
-        boolean shouldCreate = false;
+        FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(worldsConfigFile);
+        ConfigurationSection worldsSection = worldsConfig.getConfigurationSection("worlds");
+        if (worldsSection == null) return;
 
-        if (worldFolder.exists()) {
-            getLogger().info("Deleting world folder...");
+        for (String worldName : worldsSection.getKeys(false)) {
+            ConfigurationSection worldConfig = worldsSection.getConfigurationSection(worldName);
+            if (worldConfig == null) continue;
+            if (!worldConfig.getBoolean("enabled", false)) continue;
 
-            if (deleteRecursively(worldFolder)) {
-                getLogger().info("World folder deleted.");
-                shouldCreate = true;
+            getLogger().info("World reset is ENABLED for world: " + worldName);
+
+            File worldFolder = new File(getServer().getWorldContainer(), worldName);
+            boolean shouldCreate = false;
+
+            if (worldFolder.exists()) {
+                getLogger().info("Deleting world folder for '" + worldName + "'...");
+
+                if (deleteRecursively(worldFolder)) {
+                    getLogger().info("World folder deleted for '" + worldName + "'.");
+                    shouldCreate = true;
+                } else {
+                    getLogger().warning("Failed to delete world folder for '" + worldName + "'! Check file permissions.");
+                }
             } else {
-                getLogger().warning("Failed to delete world folder! Check file permissions.");
+                shouldCreate = true;
             }
-        } else {
-            shouldCreate = true;
-        }
 
-        if (shouldCreate) {
-            World world = createConfiguredWorld(config);
-            if (world != null) {
-                applyGameRules(config, world);
-                applyTime(config, world);
-                applyWeather(config, world);
-                applyPerformanceSettings(config, world);
+            if (shouldCreate) {
+                World world = createConfiguredWorld(worldConfig, worldName);
+                if (world != null) {
+                    applyGameRules(worldConfig, world);
+                    applyTime(worldConfig, world);
+                    applyWeather(worldConfig, world);
+                    applyPerformanceSettings(worldConfig, world);
+                }
             }
         }
     }
@@ -122,10 +116,33 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
 
     @Override
     public void onDisable() {
-        File configFile = new File(getDataFolder(), "config.yml");
-        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
-        if (!config.getBoolean("enabled", false)) return;
-        writeSeedAndSpawnProtection(config);
+        File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+        if (!worldsConfigFile.exists()) return;
+
+        FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(worldsConfigFile);
+
+        String defaultWorldName = getLevelName();
+        ConfigurationSection worldSection = worldsConfig.getConfigurationSection("worlds." + defaultWorldName);
+        if (worldSection != null && worldSection.getBoolean("enabled", false)) {
+            writeSeedAndSpawnProtection(worldSection);
+        }
+    }
+
+    private String getLevelName() {
+        File propertiesFile = new File(getServer().getWorldContainer(), "server.properties");
+        if (propertiesFile.exists()) {
+            try {
+                for (String line : Files.readAllLines(propertiesFile.toPath())) {
+                    if (line.startsWith("level-name=")) {
+                        String name = line.substring("level-name=".length()).trim();
+                        if (!name.isEmpty()) return name;
+                    }
+                }
+            } catch (IOException e) {
+                getLogger().warning("Failed to read server.properties: " + e.getMessage());
+            }
+        }
+        return "world";
     }
 
     @Override
@@ -135,16 +152,20 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
 
     @EventHandler
     public void onWorldLoad(WorldLoadEvent event) {
-        if (!event.getWorld().getName().equals(WORLD_NAME)) return;
+        String worldName = event.getWorld().getName();
 
-        FileConfiguration config = YamlConfiguration.loadConfiguration(new File(getDataFolder(), "config.yml"));
-        if (!config.getBoolean("enabled", false)) return;
+        File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+        if (!worldsConfigFile.exists()) return;
+
+        FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(worldsConfigFile);
+        ConfigurationSection worldConfig = worldsConfig.getConfigurationSection("worlds." + worldName);
+        if (worldConfig == null) return;
 
         World world = event.getWorld();
-        applyGameRules(config, world);
-        applyTime(config, world);
-        applyWeather(config, world);
-        applyPerformanceSettings(config, world);
+        applyGameRules(worldConfig, world);
+        applyTime(worldConfig, world);
+        applyWeather(worldConfig, world);
+        applyPerformanceSettings(worldConfig, world);
     }
 
     @EventHandler
@@ -157,10 +178,15 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         }
     }
 
+    @EventHandler
+    public void onPlayerQuit(PlayerQuitEvent event) {
+        selectedWorlds.remove(event.getPlayer().getUniqueId());
+    }
+
     @Override
     public Collection<String> suggest(CommandSourceStack stack, String[] args) {
         if (args.length == 1) {
-            return List.of("toggle", "settings", "version");
+            return List.of("toggle", "settings", "version", "world");
         }
 
         if (args.length == 2 && args[0].equalsIgnoreCase("version")) {
@@ -169,6 +195,10 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
 
         if (args.length == 2 && args[0].equalsIgnoreCase("toggle")) {
             return List.of("on", "off");
+        }
+
+        if (args.length == 2 && args[0].equalsIgnoreCase("world")) {
+            return getAvailableWorlds();
         }
 
         if (args.length == 2 && args[0].equalsIgnoreCase("settings")) {
@@ -211,7 +241,7 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         CommandSender sender = stack.getSender();
 
         if (args.length == 0) {
-            sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings|version>");
+            sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings|version|world>");
             return;
         }
 
@@ -220,45 +250,13 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
             return;
         }
 
-        File configFile = new File(getDataFolder(), "config.yml");
-        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
+        if (args[0].equalsIgnoreCase("world")) {
+            handleWorld(sender, args);
+            return;
+        }
 
         switch (args[0].toLowerCase()) {
-             case "toggle" -> {
-                if (args.length == 1) {
-                    boolean current = config.getBoolean("enabled", false);
-                    config.set("enabled", !current);
-                    try {
-                        config.save(configFile);
-                    } catch (Exception e) {
-                        getLogger().severe("Failed to save config: " + e.getMessage());
-                        sender.sendMessage("§c[WorldResetter] Failed to save config.");
-                        return;
-                    }
-                    String state = !current ? "ENABLED" : "DISABLED";
-                    getLogger().info("World reset " + state + ". Takes effect on next restart.");
-                    sender.sendMessage("§a[WorldResetter] Toggled: World reset " + state + ". Takes effect on next restart.");
-                } else if (args.length == 2) {
-                    boolean enable = args[1].equalsIgnoreCase("on");
-                    if (!enable && !args[1].equalsIgnoreCase("off")) {
-                        sender.sendMessage(PREFIX + "§eUsage: /wr toggle <on|off>");
-                        return;
-                    }
-                    config.set("enabled", enable);
-                    try {
-                        config.save(configFile);
-                    } catch (Exception e) {
-                        getLogger().severe("Failed to save config: " + e.getMessage());
-                        sender.sendMessage("§c[WorldResetter] Failed to save config.");
-                        return;
-                    }
-                    String state = enable ? "ENABLED" : "DISABLED";
-                    getLogger().info("World reset " + state + ". Takes effect on next restart.");
-                    sender.sendMessage("§a[WorldResetter] World reset " + state + ". Takes effect on next restart.");
-                } else {
-                    sender.sendMessage(PREFIX + "§eUsage: /wr toggle [on|off]");
-                }
-            }
+            case "toggle" -> handleToggle(sender, args);
             case "version" -> {
                 if (args.length >= 2 && args[1].equalsIgnoreCase("update")) {
                     handleVersionUpdate(sender);
@@ -266,7 +264,55 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
                     handleVersion(sender);
                 }
             }
-            default -> sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings|version>");
+            default -> sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings|version|world>");
+        }
+    }
+
+    private void handleWorld(CommandSender sender, String[] args) {
+        if (args.length < 2) {
+            sender.sendMessage(PREFIX + "§eUsage: /wr world <name>");
+            return;
+        }
+
+        String worldName = args[1];
+        List<String> available = getAvailableWorlds();
+        if (!available.contains(worldName)) {
+            sender.sendMessage("§c[WorldResetter] Unknown world: " + worldName);
+            return;
+        }
+
+        UUID key = sender instanceof Player player ? player.getUniqueId() : CONSOLE_UUID;
+        selectedWorlds.put(key, worldName);
+        sender.sendMessage("§a[WorldResetter] Selected world: " + worldName);
+    }
+
+    private void handleToggle(CommandSender sender, String[] args) {
+        String worldName = resolveSelectedWorld(sender);
+        File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+        FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(worldsConfigFile);
+        String path = "worlds." + worldName + ".enabled";
+        String suffix = worldSuffix(sender);
+
+        if (args.length == 1) {
+            boolean current = worldsConfig.getBoolean(path, false);
+            worldsConfig.set(path, !current);
+            saveAndNotify(worldsConfig, worldsConfigFile, sender);
+            String state = !current ? "ENABLED" : "DISABLED";
+            getLogger().info("World reset " + state + " for '" + worldName + "'. Takes effect on next restart.");
+            sender.sendMessage("§a[WorldResetter] Toggled: World reset " + state + " for '" + worldName + "'. Takes effect on next restart." + suffix);
+        } else if (args.length == 2) {
+            boolean enable = args[1].equalsIgnoreCase("on");
+            if (!enable && !args[1].equalsIgnoreCase("off")) {
+                sender.sendMessage(PREFIX + "§eUsage: /wr toggle [on|off]");
+                return;
+            }
+            worldsConfig.set(path, enable);
+            saveAndNotify(worldsConfig, worldsConfigFile, sender);
+            String state = enable ? "ENABLED" : "DISABLED";
+            getLogger().info("World reset " + state + " for '" + worldName + "'. Takes effect on next restart.");
+            sender.sendMessage("§a[WorldResetter] World reset " + state + " for '" + worldName + "'. Takes effect on next restart." + suffix);
+        } else {
+            sender.sendMessage(PREFIX + "§eUsage: /wr toggle [on|off]");
         }
     }
 
@@ -398,32 +444,38 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
             return;
         }
 
-        File configFile = new File(getDataFolder(), "config.yml");
-        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
+        String worldName = resolveSelectedWorld(sender);
+        File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+        FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(worldsConfigFile);
+        String path = "worlds." + worldName + ".seed";
+        String suffix = worldSuffix(sender);
 
         String value = args[2];
         if (value.equalsIgnoreCase("random")) {
-            config.set("settings.seed", "");
-            sender.sendMessage("§a[WorldResetter] Seed cleared. A random seed will be used.");
+            worldsConfig.set(path, "");
+            sender.sendMessage("§a[WorldResetter] Seed cleared. A random seed will be used." + suffix);
         } else {
-            config.set("settings.seed", value);
-            sender.sendMessage("§a[WorldResetter] Seed set to: " + value);
+            worldsConfig.set(path, value);
+            sender.sendMessage("§a[WorldResetter] Seed set to: " + value + suffix);
         }
 
-        saveAndNotify(config, configFile, sender);
+        saveAndNotify(worldsConfig, worldsConfigFile, sender);
     }
 
     private void handleGamerule(CommandSender sender, String[] args) {
+        String worldName = resolveSelectedWorld(sender);
+        String suffix = worldSuffix(sender);
+
         if (args.length < 3) {
             sender.sendMessage(PREFIX + "§eUsage: /wr settings gamerule <rule> <value>");
             return;
         }
 
         if (args[2].equalsIgnoreCase("list")) {
-            FileConfiguration config = YamlConfiguration.loadConfiguration(new File(getDataFolder(), "config.yml"));
-            ConfigurationSection section = config.getConfigurationSection("settings.gamerules");
+            FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(new File(getDataFolder(), "worlds-config.yml"));
+            ConfigurationSection section = worldsConfig.getConfigurationSection("worlds." + worldName + ".gamerules");
             if (section == null || section.getKeys(false).isEmpty()) {
-                sender.sendMessage(PREFIX + "§eNo gamerules configured.");
+                sender.sendMessage(PREFIX + "§eNo gamerules configured." + suffix);
                 return;
             }
             sender.sendMessage(PREFIX + "§eSaved gamerules:");
@@ -434,12 +486,12 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         }
 
         if (args[2].equalsIgnoreCase("reset")) {
-            File configFile = new File(getDataFolder(), "config.yml");
-            FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
-            config.set("settings.gamerules", null);
-            config.set("settings.gamerules", Map.of());
-            saveAndNotify(config, configFile, sender);
-            sender.sendMessage("§a[WorldResetter] All gamerules cleared.");
+            File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+            FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(worldsConfigFile);
+            worldsConfig.set("worlds." + worldName + ".gamerules", null);
+            worldsConfig.set("worlds." + worldName + ".gamerules", Map.of());
+            saveAndNotify(worldsConfig, worldsConfigFile, sender);
+            sender.sendMessage("§a[WorldResetter] All gamerules cleared." + suffix);
             return;
         }
 
@@ -471,11 +523,11 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
             }
         }
 
-        File configFile = new File(getDataFolder(), "config.yml");
-        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
-        config.set("settings.gamerules." + rule, value);
-        saveAndNotify(config, configFile, sender);
-        sender.sendMessage("§a[WorldResetter] Gamerule " + rule + " set to: " + value);
+        File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+        FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(worldsConfigFile);
+        worldsConfig.set("worlds." + worldName + ".gamerules." + rule, value);
+        saveAndNotify(worldsConfig, worldsConfigFile, sender);
+        sender.sendMessage("§a[WorldResetter] Gamerule " + rule + " set to: " + value + suffix);
     }
 
     private void handleWorldType(CommandSender sender, String[] args) {
@@ -489,6 +541,12 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
             sender.sendMessage(PREFIX + "§eUsage: /wr settings time <day|night|0-24000>");
             return;
         }
+
+        String worldName = resolveSelectedWorld(sender);
+        File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+        FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(worldsConfigFile);
+        String path = "worlds." + worldName + ".time";
+        String suffix = worldSuffix(sender);
 
         String timeStr = args[2];
         long timeValue;
@@ -510,11 +568,9 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
             }
         }
 
-        File configFile = new File(getDataFolder(), "config.yml");
-        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
-        config.set("settings.time", timeValue);
-        saveAndNotify(config, configFile, sender);
-        sender.sendMessage("§a[WorldResetter] Time set to: " + timeStr.toLowerCase());
+        worldsConfig.set(path, timeValue);
+        saveAndNotify(worldsConfig, worldsConfigFile, sender);
+        sender.sendMessage("§a[WorldResetter] Time set to: " + timeStr.toLowerCase() + suffix);
     }
 
     private void handleWeather(CommandSender sender, String[] args) {
@@ -523,17 +579,21 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
             return;
         }
 
+        String worldName = resolveSelectedWorld(sender);
+        File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+        FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(worldsConfigFile);
+        String path = "worlds." + worldName + ".weather";
+        String suffix = worldSuffix(sender);
+
         String weather = args[2].toLowerCase();
         if (!weather.equals("clear") && !weather.equals("rain") && !weather.equals("thunder")) {
             sender.sendMessage("§c[WorldResetter] Invalid weather. Valid values: clear, rain, thunder.");
             return;
         }
 
-        File configFile = new File(getDataFolder(), "config.yml");
-        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
-        config.set("settings.weather", weather);
-        saveAndNotify(config, configFile, sender);
-        sender.sendMessage("§a[WorldResetter] Weather set to: " + weather);
+        worldsConfig.set(path, weather);
+        saveAndNotify(worldsConfig, worldsConfigFile, sender);
+        sender.sendMessage("§a[WorldResetter] Weather set to: " + weather + suffix);
     }
 
     private void handleSpawnProtection(CommandSender sender, String[] args) {
@@ -554,11 +614,12 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
             return;
         }
 
-        File configFile = new File(getDataFolder(), "config.yml");
-        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
-        config.set("settings.spawn-protection", radius);
-        saveAndNotify(config, configFile, sender);
-        sender.sendMessage("§a[WorldResetter] Spawn protection radius set to: " + radius);
+        String worldName = resolveSelectedWorld(sender);
+        File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+        FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(worldsConfigFile);
+        worldsConfig.set("worlds." + worldName + ".spawn-protection", radius);
+        saveAndNotify(worldsConfig, worldsConfigFile, sender);
+        sender.sendMessage("§a[WorldResetter] Spawn protection radius set to: " + radius + worldSuffix(sender));
     }
 
     private void handleViewDistance(CommandSender sender, String[] args) {
@@ -570,11 +631,12 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         int distance = parseDistanceArg(sender, args[2], "view distance", 2, 32);
         if (distance == Integer.MIN_VALUE) return;
 
-        File configFile = new File(getDataFolder(), "config.yml");
-        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
-        config.set("settings.view-distance", distance);
-        saveAndNotify(config, configFile, sender);
-        sender.sendMessage("§a[WorldResetter] View distance set to: " + (distance == -1 ? "server default" : distance));
+        String worldName = resolveSelectedWorld(sender);
+        File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+        FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(worldsConfigFile);
+        worldsConfig.set("worlds." + worldName + ".view-distance", distance);
+        saveAndNotify(worldsConfig, worldsConfigFile, sender);
+        sender.sendMessage("§a[WorldResetter] View distance set to: " + (distance == -1 ? "server default" : distance) + worldSuffix(sender));
     }
 
     private void handleSimulationDistance(CommandSender sender, String[] args) {
@@ -586,11 +648,12 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         int distance = parseDistanceArg(sender, args[2], "simulation distance", 2, 32);
         if (distance == Integer.MIN_VALUE) return;
 
-        File configFile = new File(getDataFolder(), "config.yml");
-        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
-        config.set("settings.simulation-distance", distance);
-        saveAndNotify(config, configFile, sender);
-        sender.sendMessage("§a[WorldResetter] Simulation distance set to: " + (distance == -1 ? "server default" : distance));
+        String worldName = resolveSelectedWorld(sender);
+        File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+        FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(worldsConfigFile);
+        worldsConfig.set("worlds." + worldName + ".simulation-distance", distance);
+        saveAndNotify(worldsConfig, worldsConfigFile, sender);
+        sender.sendMessage("§a[WorldResetter] Simulation distance set to: " + (distance == -1 ? "server default" : distance) + worldSuffix(sender));
     }
 
     private int parseDistanceArg(CommandSender sender, String value, String label, int min, int max) {
@@ -617,41 +680,49 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         }
 
         boolean value = Boolean.parseBoolean(args[2]);
-        File configFile = new File(getDataFolder(), "config.yml");
-        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
-        config.set("settings.generate-structures", value);
-        saveAndNotify(config, configFile, sender);
-        sender.sendMessage("§a[WorldResetter] Structure generation set to: " + value);
+        String worldName = resolveSelectedWorld(sender);
+        File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+        FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(worldsConfigFile);
+        worldsConfig.set("worlds." + worldName + ".generate-structures", value);
+        saveAndNotify(worldsConfig, worldsConfigFile, sender);
+        sender.sendMessage("§a[WorldResetter] Structure generation set to: " + value + worldSuffix(sender));
     }
 
     private void handleInfo(CommandSender sender) {
-        FileConfiguration config = YamlConfiguration.loadConfiguration(new File(getDataFolder(), "config.yml"));
+        String worldName = resolveSelectedWorld(sender);
+        FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(new File(getDataFolder(), "worlds-config.yml"));
+        ConfigurationSection worldSection = worldsConfig.getConfigurationSection("worlds." + worldName);
 
-        sender.sendMessage(PREFIX + "§eCurrent settings:");
+        sender.sendMessage("§eSettings for world: §f" + worldName);
 
-        String seed = config.getString("settings.seed", "");
+        if (worldSection == null) {
+            sender.sendMessage("  §eNo settings configured.");
+            return;
+        }
+
+        String seed = worldSection.getString("seed", "");
         sender.sendMessage("  §eSeed: §f" + (seed.isEmpty() ? "random" : seed));
 
         sender.sendMessage("  §eWorld Type: §6⚠ Under maintenance");
 
-        long time = config.getLong("settings.time", -1);
+        long time = worldSection.getLong("time", -1);
         sender.sendMessage("  §eTime: §f" + (time == -1 ? "not set" : time));
 
-        String weather = config.getString("settings.weather", "");
+        String weather = worldSection.getString("weather", "");
         sender.sendMessage("  §eWeather: §f" + (weather.isEmpty() ? "not set" : weather));
 
-        int spawnProtection = config.getInt("settings.spawn-protection", -1);
+        int spawnProtection = worldSection.getInt("spawn-protection", -1);
         sender.sendMessage("  §eSpawn Protection: §f" + (spawnProtection == -1 ? "not set" : spawnProtection));
 
-        int viewDistance = config.getInt("settings.view-distance", -1);
+        int viewDistance = worldSection.getInt("view-distance", -1);
         sender.sendMessage("  §eView Distance: §f" + (viewDistance == -1 ? "server default" : viewDistance));
 
-        int simulationDistance = config.getInt("settings.simulation-distance", -1);
+        int simulationDistance = worldSection.getInt("simulation-distance", -1);
         sender.sendMessage("  §eSimulation Distance: §f" + (simulationDistance == -1 ? "server default" : simulationDistance));
 
-        sender.sendMessage("  §eGenerate Structures: §f" + config.getBoolean("settings.generate-structures", true));
+        sender.sendMessage("  §eGenerate Structures: §f" + worldSection.getBoolean("generate-structures", true));
 
-        ConfigurationSection gamerules = config.getConfigurationSection("settings.gamerules");
+        ConfigurationSection gamerules = worldSection.getConfigurationSection("gamerules");
         if (gamerules != null && !gamerules.getKeys(false).isEmpty()) {
             sender.sendMessage("  §eGamerules:");
             for (String rule : gamerules.getKeys(false)) {
@@ -663,27 +734,103 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
     }
 
     private void handleReset(CommandSender sender) {
-        File configFile = new File(getDataFolder(), "config.yml");
-        FileConfiguration config = YamlConfiguration.loadConfiguration(configFile);
+        String worldName = resolveSelectedWorld(sender);
+        File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+        FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(worldsConfigFile);
+        String path = "worlds." + worldName;
+        String suffix = worldSuffix(sender);
 
-        config.set("settings.seed", "");
-        config.set("settings.world-type", "normal");
-        config.set("settings.time", -1);
-        config.set("settings.weather", "");
-        config.set("settings.spawn-protection", -1);
-        config.set("settings.view-distance", -1);
-        config.set("settings.simulation-distance", -1);
-        config.set("settings.generate-structures", true);
-        config.set("settings.gamerules", null);
-        config.set("settings.gamerules", Map.of());
+        worldsConfig.set(path + ".seed", "");
+        worldsConfig.set(path + ".world-type", "normal");
+        worldsConfig.set(path + ".time", -1);
+        worldsConfig.set(path + ".weather", "");
+        worldsConfig.set(path + ".spawn-protection", -1);
+        worldsConfig.set(path + ".view-distance", -1);
+        worldsConfig.set(path + ".simulation-distance", -1);
+        worldsConfig.set(path + ".generate-structures", true);
+        worldsConfig.set(path + ".gamerules", null);
+        worldsConfig.set(path + ".gamerules", Map.of());
+        worldsConfig.set(path + ".enabled", false);
 
-        saveAndNotify(config, configFile, sender);
-        sender.sendMessage("§a[WorldResetter] All settings reset to defaults.");
+        saveAndNotify(worldsConfig, worldsConfigFile, sender);
+        sender.sendMessage("§a[WorldResetter] All settings reset to defaults for world '" + worldName + "'." + suffix);
     }
 
-    private void writeSeedAndSpawnProtection(FileConfiguration config) {
-        String seed = config.getString("settings.seed", "");
-        int spawnProtection = config.getInt("settings.spawn-protection", -1);
+    private void migrateOldConfig() {
+        File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+        if (worldsConfigFile.exists()) return;
+
+        File oldConfigFile = new File(getDataFolder(), "config.yml");
+        FileConfiguration newConfig = new YamlConfiguration();
+
+        if (oldConfigFile.exists()) {
+            FileConfiguration oldConfig = YamlConfiguration.loadConfiguration(oldConfigFile);
+            ConfigurationSection oldSettings = oldConfig.getConfigurationSection("settings");
+
+            getLogger().info("Migrating old config.yml to worlds-config.yml...");
+
+            newConfig.set("worlds.world.enabled", oldConfig.getBoolean("enabled", false));
+
+            if (oldSettings != null) {
+                for (String key : oldSettings.getKeys(true)) {
+                    newConfig.set("worlds.world." + key, oldSettings.get(key));
+                }
+            }
+        } else {
+            newConfig.set("worlds", Map.of());
+        }
+
+        try {
+            newConfig.save(worldsConfigFile);
+            if (oldConfigFile.exists()) {
+                getLogger().info("Migration complete. Old config.yml is preserved for backup.");
+            }
+        } catch (IOException e) {
+            getLogger().severe("Failed to save worlds-config.yml: " + e.getMessage());
+        }
+    }
+
+    private List<String> getAvailableWorlds() {
+        Set<String> worlds = new HashSet<>();
+
+        for (World world : Bukkit.getWorlds()) {
+            worlds.add(world.getName());
+        }
+
+        File container = getServer().getWorldContainer();
+        File[] dirs = container.listFiles(File::isDirectory);
+        if (dirs != null) {
+            for (File dir : dirs) {
+                if (new File(dir, "level.dat").exists()) {
+                    worlds.add(dir.getName());
+                }
+            }
+        }
+
+        return worlds.stream().sorted().toList();
+    }
+
+    private String resolveSelectedWorld(CommandSender sender) {
+        UUID key = sender instanceof Player player ? player.getUniqueId() : CONSOLE_UUID;
+        String selected = selectedWorlds.get(key);
+        if (selected != null) return selected;
+
+        if (sender instanceof Player player) {
+            return player.getWorld().getName();
+        }
+
+        return getLevelName();
+    }
+
+    private String worldSuffix(CommandSender sender) {
+        UUID key = sender instanceof Player player ? player.getUniqueId() : CONSOLE_UUID;
+        if (selectedWorlds.containsKey(key)) return "";
+        return " §7(world: " + resolveSelectedWorld(sender) + ")";
+    }
+
+    private void writeSeedAndSpawnProtection(ConfigurationSection worldConfig) {
+        String seed = worldConfig.getString("seed", "");
+        int spawnProtection = worldConfig.getInt("spawn-protection", -1);
 
         Map<String, String> entries = new HashMap<>();
         entries.put("level-seed", seed);
@@ -695,11 +842,11 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         modifyServerProperties(entries);
     }
 
-    private World createConfiguredWorld(FileConfiguration config) {
-        String worldType = config.getString("settings.world-type", "normal");
-        String seed = config.getString("settings.seed", "");
+    private World createConfiguredWorld(ConfigurationSection worldConfig, String worldName) {
+        String worldType = worldConfig.getString("world-type", "normal");
+        String seed = worldConfig.getString("seed", "");
 
-        WorldCreator creator = new WorldCreator(WORLD_NAME);
+        WorldCreator creator = new WorldCreator(worldName);
 
         switch (worldType.toLowerCase()) {
             case "flat" -> creator.type(WorldType.FLAT);
@@ -716,15 +863,15 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
             }
         }
 
-        boolean generateStructures = config.getBoolean("settings.generate-structures", true);
+        boolean generateStructures = worldConfig.getBoolean("generate-structures", true);
         creator.generateStructures(generateStructures);
 
         World world = Bukkit.createWorld(creator);
         if (world != null) {
-            getLogger().info("Created world '" + WORLD_NAME + "' with type: " + worldType
+            getLogger().info("Created world '" + worldName + "' with type: " + worldType
                 + (seed.isEmpty() ? "" : ", seed: " + seed));
         } else {
-            getLogger().severe("Failed to create world '" + WORLD_NAME + "'.");
+            getLogger().severe("Failed to create world '" + worldName + "'.");
         }
         return world;
     }
@@ -766,8 +913,8 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
     }
 
     @SuppressWarnings("unchecked")
-    private void applyGameRules(FileConfiguration config, World world) {
-        ConfigurationSection section = config.getConfigurationSection("settings.gamerules");
+    private void applyGameRules(ConfigurationSection worldConfig, World world) {
+        ConfigurationSection section = worldConfig.getConfigurationSection("gamerules");
         if (section == null) return;
 
         for (String ruleName : section.getKeys(false)) {
@@ -794,30 +941,30 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         }
     }
 
-    private void applyPerformanceSettings(FileConfiguration config, World world) {
-        int viewDistance = config.getInt("settings.view-distance", -1);
+    private void applyPerformanceSettings(ConfigurationSection worldConfig, World world) {
+        int viewDistance = worldConfig.getInt("view-distance", -1);
         if (viewDistance >= 2) {
             world.setViewDistance(viewDistance);
             getLogger().info("Set view distance to " + viewDistance);
         }
 
-        int simulationDistance = config.getInt("settings.simulation-distance", -1);
+        int simulationDistance = worldConfig.getInt("simulation-distance", -1);
         if (simulationDistance >= 2) {
             world.setSimulationDistance(simulationDistance);
             getLogger().info("Set simulation distance to " + simulationDistance);
         }
     }
 
-    private void applyTime(FileConfiguration config, World world) {
-        long time = config.getLong("settings.time", -1);
+    private void applyTime(ConfigurationSection worldConfig, World world) {
+        long time = worldConfig.getLong("time", -1);
         if (time < 0) return;
 
         world.setTime(time);
         getLogger().info("Set world time to " + time);
     }
 
-    private void applyWeather(FileConfiguration config, World world) {
-        String weather = config.getString("settings.weather", "");
+    private void applyWeather(ConfigurationSection worldConfig, World world) {
+        String weather = worldConfig.getString("weather", "");
         if (weather.isEmpty()) return;
 
         switch (weather.toLowerCase()) {
@@ -910,6 +1057,26 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
             return 0;
         }
     }
+
+    private static final List<String> COMMON_GAMERULES = List.of(
+        "announceAdvancements", "blockExplosionDropDecay", "commandBlockOutput",
+        "disableElytraMovementCheck", "disableRaids", "doDaylightCycle",
+        "doEntityDrops", "doFireTick", "doImmediateRespawn", "doInsomnia",
+        "doLimitedCrafting", "doMobLoot", "doMobSpawning", "doPatrolSpawning",
+        "doTileDrops", "doTraderSpawning", "doVinesSpread", "doWeatherCycle",
+        "doWardenSpawning", "drowningDamage", "enderPearlsVanishOnDeath",
+        "fallDamage", "fireDamage", "forgiveDeadPlayers", "freezeDamage",
+        "globalSoundEvents", "keepInventory",
+        "lavaSourceConversion", "logAdminCommands", "maxCommandChainLength",
+        "maxEntityCramming", "mobExplosionDropDecay", "mobGriefing",
+        "naturalRegeneration", "playersSleepingPercentage",
+        "projectilesCanBreakBlocks", "randomTickSpeed", "reducedDebugInfo",
+        "respawnBlocksExplode", "sendCommandFeedback", "showBorderEffect",
+        "showCoordinates", "showDeathMessages", "showRecipeMessages",
+        "showTags", "snowAccumulationHeight", "spawnRadius",
+        "spectatorsGenerateChunks", "tntExplosionDropDecay", "universalAnger",
+        "waterSourceConversion"
+    );
 
     private void checkForUpdates() {
         HttpClient client = HttpClient.newHttpClient();
