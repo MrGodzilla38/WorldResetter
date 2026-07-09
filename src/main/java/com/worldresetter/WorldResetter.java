@@ -1,5 +1,9 @@
 package com.worldresetter;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import io.papermc.paper.command.brigadier.BasicCommand;
 import io.papermc.paper.command.brigadier.CommandSourceStack;
 import org.bukkit.Bukkit;
@@ -13,13 +17,19 @@ import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.world.WorldLoadEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -52,6 +62,8 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         "spectatorsGenerateChunks", "tntExplosionDropDecay", "universalAnger",
         "waterSourceConversion"
     );
+
+    private volatile String latestVersion;
 
     @Override
     public void onLoad() {
@@ -99,6 +111,7 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
     public void onEnable() {
         registerCommand("worldresetter", "Manages WorldResetter settings", List.of("wr"), this);
         getServer().getPluginManager().registerEvents(this, this);
+        getServer().getScheduler().runTaskTimerAsynchronously(this, this::checkForUpdates, 0L, 432000L);
     }
 
     @Override
@@ -128,10 +141,20 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         applyPerformanceSettings(config, world);
     }
 
+    @EventHandler
+    public void onPlayerJoin(PlayerJoinEvent event) {
+        if (latestVersion == null) return;
+        String current = getPluginMeta().getVersion();
+        if (compareVersions(latestVersion, current) <= 0) return;
+        if (event.getPlayer().isOp() || event.getPlayer().hasPermission("worldresetter.admin")) {
+            event.getPlayer().sendMessage("§e[WorldResetter] Update available. Latest: §a" + latestVersion + "§e, Current: §c" + current);
+        }
+    }
+
     @Override
     public Collection<String> suggest(CommandSourceStack stack, String[] args) {
         if (args.length == 1) {
-            return List.of("toggle", "settings");
+            return List.of("toggle", "settings", "version");
         }
 
         if (args.length == 2 && args[0].equalsIgnoreCase("toggle")) {
@@ -178,7 +201,7 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         CommandSender sender = stack.getSender();
 
         if (args.length == 0) {
-            sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings>");
+            sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings|version>");
             return;
         }
 
@@ -226,13 +249,27 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
                     sender.sendMessage(PREFIX + "§eUsage: /wr toggle [on|off]");
                 }
             }
-            default -> sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings>");
+            case "version" -> handleVersion(sender);
+            default -> sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings|version>");
         }
     }
 
     private static final String SETTINGS_USAGE =
         "§eUsage: /wr settings <seed|gamerule|worldtype|time|weather|spawnprotection|"
         + "viewdistance|simulationdistance|structures|info|reset>";
+
+    private void handleVersion(CommandSender sender) {
+        String current = getPluginMeta().getVersion();
+        if (latestVersion == null) {
+            sender.sendMessage(PREFIX + "§eVersion information not yet available. Please try again later.");
+            return;
+        }
+        if (compareVersions(latestVersion, current) > 0) {
+            sender.sendMessage("§e[WorldResetter] Update available. Latest: §a" + latestVersion + "§e, Current: §c" + current);
+        } else {
+            sender.sendMessage("§a[WorldResetter] Version is up to date: §f" + current);
+        }
+    }
 
     private boolean handleSettings(CommandSender sender, String[] args) {
         if (args.length < 2) {
@@ -754,5 +791,74 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         }
 
         return success[0];
+    }
+
+    private static int compareVersions(String v1, String v2) {
+        String[] parts1 = v1.split("\\.");
+        String[] parts2 = v2.split("\\.");
+        int maxLen = Math.max(parts1.length, parts2.length);
+        for (int i = 0; i < maxLen; i++) {
+            int p1 = parsePart(parts1, i);
+            int p2 = parsePart(parts2, i);
+            if (p1 != p2) return Integer.compare(p1, p2);
+        }
+        return 0;
+    }
+
+    private static int parsePart(String[] parts, int index) {
+        if (index >= parts.length) return 0;
+        try {
+            return Integer.parseInt(parts[index].replaceAll("[^0-9].*$", ""));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    private void checkForUpdates() {
+        HttpClient client = HttpClient.newHttpClient();
+        HttpRequest request = HttpRequest.newBuilder()
+            .uri(URI.create("https://api.modrinth.com/v2/project/worldresetter-plugin/version"))
+            .timeout(Duration.ofSeconds(10))
+            .GET()
+            .build();
+
+        client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+            .thenAccept(response -> {
+                if (response.statusCode() == 200) {
+                    try {
+                        JsonArray versions = JsonParser.parseString(response.body()).getAsJsonArray();
+                        String latest = null;
+                        String latestDate = null;
+
+                        for (JsonElement elem : versions) {
+                            JsonObject ver = elem.getAsJsonObject();
+                            String type = ver.get("version_type").getAsString();
+                            String date = ver.get("date_published").getAsString();
+
+                            if ("release".equals(type)) {
+                                if (latest == null || date.compareTo(latestDate) > 0) {
+                                    latest = ver.get("version_number").getAsString();
+                                    latestDate = date;
+                                }
+                            }
+                        }
+
+                        if (latest == null && versions.size() > 0) {
+                            latest = versions.get(0).getAsJsonObject().get("version_number").getAsString();
+                        }
+
+                        latestVersion = latest;
+                        getLogger().info("Latest version: " + (latest != null ? latest : "unknown"));
+                    } catch (Exception e) {
+                        getLogger().warning("Failed to parse Modrinth response: " + e.getMessage());
+                    }
+                } else {
+                    getLogger().warning("Modrinth API returned status " + response.statusCode());
+                }
+            })
+            .exceptionally(e -> {
+                getLogger().warning("Failed to check for updates: " + e.getMessage());
+                return null;
+            });
     }
 }
