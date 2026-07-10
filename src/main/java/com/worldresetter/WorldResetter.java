@@ -62,7 +62,6 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
     @Override
     public void onLoad() {
         if (!getDataFolder().exists()) getDataFolder().mkdirs();
-
         migrateOldConfig();
 
         File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
@@ -72,46 +71,77 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         ConfigurationSection worldsSection = worldsConfig.getConfigurationSection("worlds");
         if (worldsSection == null) return;
 
-        for (String worldName : worldsSection.getKeys(false)) {
-            ConfigurationSection worldConfig = worldsSection.getConfigurationSection(worldName);
-            if (worldConfig == null) continue;
-            if (!worldConfig.getBoolean("enabled", false)) continue;
+        String defaultWorldName = getLevelName();
+        ConfigurationSection defaultWorldConfig = worldsSection.getConfigurationSection(defaultWorldName);
+        if (defaultWorldConfig == null) return;
+        if (!defaultWorldConfig.getBoolean("enabled", false)) return;
 
-            getLogger().info("World reset is ENABLED for world: " + worldName);
+        File worldFolder = new File(getServer().getWorldContainer(), defaultWorldName);
+        if (worldFolder.exists()) {
+            getLogger().info("Deleting default world folder for '" + defaultWorldName + "' (server will recreate it)...");
+            deleteRecursively(worldFolder);
+        }
+    }
 
-            File worldFolder = new File(getServer().getWorldContainer(), worldName);
-            boolean shouldCreate = false;
+    private void resetWorld(String worldName, ConfigurationSection worldConfig) {
+        getLogger().info("World reset is ENABLED for world: " + worldName);
 
-            if (worldFolder.exists()) {
-                getLogger().info("Deleting world folder for '" + worldName + "'...");
+        File worldFolder = new File(getServer().getWorldContainer(), worldName);
+        boolean shouldCreate = false;
 
-                if (deleteRecursively(worldFolder)) {
-                    getLogger().info("World folder deleted for '" + worldName + "'.");
-                    shouldCreate = true;
-                } else {
-                    getLogger().warning("Failed to delete world folder for '" + worldName + "'! Check file permissions.");
-                }
-            } else {
+        if (worldFolder.exists()) {
+            getLogger().info("Deleting world folder for '" + worldName + "'...");
+
+            if (deleteRecursively(worldFolder)) {
+                getLogger().info("World folder deleted for '" + worldName + "'.");
                 shouldCreate = true;
+            } else {
+                getLogger().warning("Failed to delete world folder for '" + worldName + "'! Check file permissions.");
             }
+        } else {
+            shouldCreate = true;
+        }
 
-            if (shouldCreate) {
-                World world = createConfiguredWorld(worldConfig, worldName);
-                if (world != null) {
-                    applyGameRules(worldConfig, world);
-                    applyTime(worldConfig, world);
-                    applyWeather(worldConfig, world);
-                    applyPerformanceSettings(worldConfig, world);
-                }
+        if (shouldCreate) {
+            World world = createConfiguredWorld(worldConfig, worldName);
+            if (world != null) {
+                applyGameRules(worldConfig, world);
+                applyTime(worldConfig, world);
+                applyWeather(worldConfig, world);
+                applyPerformanceSettings(worldConfig, world);
             }
         }
     }
 
     @Override
     public void onEnable() {
-        registerCommand("worldresetter", "Manages WorldResetter settings", List.of("wr"), this);
         getServer().getPluginManager().registerEvents(this, this);
+        registerCommand("worldresetter", "Manages WorldResetter settings", List.of("wr"), this);
         getServer().getScheduler().runTaskTimerAsynchronously(this, this::checkForUpdates, 0L, 432000L);
+
+        File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+        if (!worldsConfigFile.exists()) return;
+
+        FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(worldsConfigFile);
+        ConfigurationSection worldsSection = worldsConfig.getConfigurationSection("worlds");
+        if (worldsSection == null) return;
+
+        String defaultWorldName = getLevelName();
+
+        for (String worldName : worldsSection.getKeys(false)) {
+            if (worldName.equals(defaultWorldName)) continue;
+
+            ConfigurationSection worldConfig = worldsSection.getConfigurationSection(worldName);
+            if (worldConfig == null) continue;
+            if (!worldConfig.getBoolean("enabled", false)) continue;
+
+            World existing = Bukkit.getWorld(worldName);
+            if (existing != null) {
+                Bukkit.unloadWorld(existing, false);
+            }
+
+            resetWorld(worldName, worldConfig);
+        }
     }
 
     @Override
@@ -699,6 +729,9 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
             sender.sendMessage("  §eNo settings configured.");
             return;
         }
+
+        boolean enabled = worldSection.getBoolean("enabled", false);
+        sender.sendMessage("  §eReset Enabled: " + (enabled ? "§atrue" : "§cfalse"));
 
         String seed = worldSection.getString("seed", "");
         sender.sendMessage("  §eSeed: §f" + (seed.isEmpty() ? "random" : seed));
