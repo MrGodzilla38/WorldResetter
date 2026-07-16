@@ -216,7 +216,7 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
     @Override
     public Collection<String> suggest(CommandSourceStack stack, String[] args) {
         if (args.length == 1) {
-            return List.of("toggle", "settings", "version", "world");
+            return List.of("toggle", "settings", "version", "world", "help");
         }
 
         if (args.length == 2 && args[0].equalsIgnoreCase("version")) {
@@ -271,7 +271,7 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         CommandSender sender = stack.getSender();
 
         if (args.length == 0) {
-            sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings|version|world>");
+            sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings|version|world|help>");
             return;
         }
 
@@ -294,7 +294,8 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
                     handleVersion(sender);
                 }
             }
-            default -> sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings|version|world>");
+            case "help" -> handleHelp(sender);
+            default -> sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings|version|world|help>");
         }
     }
 
@@ -314,6 +315,30 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         UUID key = sender instanceof Player player ? player.getUniqueId() : CONSOLE_UUID;
         selectedWorlds.put(key, worldName);
         sender.sendMessage("§a[WorldResetter] Selected world: " + worldName);
+    }
+
+    private void handleHelp(CommandSender sender) {
+        sender.sendMessage("§6=== WorldResetter Help ===");
+        sender.sendMessage("§e/wr §7Shows this usage info");
+        sender.sendMessage("§e/wr toggle §7Toggles world reset on/off");
+        sender.sendMessage("§e/wr toggle on §7Enables world reset on next startup");
+        sender.sendMessage("§e/wr toggle off §7Disables world reset on next startup");
+        sender.sendMessage("§e/wr world <name> §7Selects a world to manage");
+        sender.sendMessage("§e/wr settings info §7Shows current settings");
+        sender.sendMessage("§e/wr settings seed <seed|random> §7Sets the world seed (or random)");
+        sender.sendMessage("§e/wr settings worldtype <type> §7§mCurrently under maintenance — disabled");
+        sender.sendMessage("§e/wr settings gamerule <rule> <value> §7Sets a gamerule");
+        sender.sendMessage("§e/wr settings gamerule list §7Lists configured gamerules");
+        sender.sendMessage("§e/wr settings gamerule reset §7Clears all gamerules");
+        sender.sendMessage("§e/wr settings time <day|night|0-24000> §7Sets world time");
+        sender.sendMessage("§e/wr settings weather <clear|rain|thunder> §7Sets weather");
+        sender.sendMessage("§e/wr settings spawnprotection <radius> §7Sets spawn protection radius");
+        sender.sendMessage("§e/wr settings viewdistance <2-32|default> §7Sets view distance (Paper-only)");
+        sender.sendMessage("§e/wr settings simulationdistance <2-32|default> §7Sets simulation distance (Paper-only)");
+        sender.sendMessage("§e/wr settings structures <true|false> §7Toggles structure generation");
+        sender.sendMessage("§e/wr settings reset §7Resets all settings to defaults");
+        sender.sendMessage("§e/wr version §7Shows current version vs latest available");
+        sender.sendMessage("§e/wr version update §7Downloads and applies the latest version");
     }
 
     private void handleToggle(CommandSender sender, String[] args) {
