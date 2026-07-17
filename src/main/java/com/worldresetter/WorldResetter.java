@@ -271,7 +271,7 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         CommandSender sender = stack.getSender();
 
         if (args.length == 0) {
-            sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings|version|world|help>");
+            handleHelp(sender);
             return;
         }
 
