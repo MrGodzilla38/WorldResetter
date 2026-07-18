@@ -216,7 +216,7 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
     @Override
     public Collection<String> suggest(CommandSourceStack stack, String[] args) {
         if (args.length == 1) {
-            return List.of("toggle", "settings", "version", "world", "help");
+            return List.of("toggle", "settings", "version", "world", "help", "list");
         }
 
         if (args.length == 2 && args[0].equalsIgnoreCase("version")) {
@@ -286,6 +286,7 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         }
 
         switch (args[0].toLowerCase()) {
+            case "list" -> handleList(sender);
             case "toggle" -> handleToggle(sender, args);
             case "version" -> {
                 if (args.length >= 2 && args[1].equalsIgnoreCase("update")) {
@@ -296,6 +297,37 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
             }
             case "help" -> handleHelp(sender);
             default -> sender.sendMessage(PREFIX + "§eUsage: /wr <toggle|settings|version|world|help>");
+        }
+    }
+
+    private void handleList(CommandSender sender) {
+        File worldsConfigFile = new File(getDataFolder(), "worlds-config.yml");
+        FileConfiguration worldsConfig = YamlConfiguration.loadConfiguration(worldsConfigFile);
+        ConfigurationSection worldsSection = worldsConfig.getConfigurationSection("worlds");
+
+        Set<String> configuredWorlds = new HashSet<>();
+        Map<String, Boolean> enabledMap = new HashMap<>();
+        if (worldsSection != null) {
+            for (String name : worldsSection.getKeys(false)) {
+                configuredWorlds.add(name);
+                enabledMap.put(name, worldsSection.getBoolean(name + ".enabled", false));
+            }
+        }
+
+        List<String> availableWorlds = getAvailableWorlds();
+
+        sender.sendMessage("§6=== World List ===");
+        for (String worldName : availableWorlds) {
+            if (configuredWorlds.contains(worldName)) {
+                boolean enabled = enabledMap.get(worldName);
+                if (enabled) {
+                    sender.sendMessage("§e" + worldName + "  §a✔ ENABLED");
+                } else {
+                    sender.sendMessage("§e" + worldName + "  §c✘ DISABLED");
+                }
+            } else {
+                sender.sendMessage("§e" + worldName + "  §e? NOT CONFIGURED");
+            }
         }
     }
 
@@ -323,6 +355,7 @@ public class WorldResetter extends JavaPlugin implements Listener, BasicCommand 
         sender.sendMessage("§e/wr toggle §7Toggles world reset on/off");
         sender.sendMessage("§e/wr toggle on §7Enables world reset on next startup");
         sender.sendMessage("§e/wr toggle off §7Disables world reset on next startup");
+        sender.sendMessage("§e/wr list §7Lists all worlds and their reset status");
         sender.sendMessage("§e/wr world <name> §7Selects a world to manage");
         sender.sendMessage("§e/wr settings info §7Shows current settings");
         sender.sendMessage("§e/wr settings seed <seed|random> §7Sets the world seed (or random)");
